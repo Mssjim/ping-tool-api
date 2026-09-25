@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ping Dashboard</title>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        body {
+            background: #f0f0f0;
+            margin: 20px;
+        }
+
+        .card {
+            background: #fff;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 10px;
+            box-shadow: 5px 5px 5px rgba(0,0,0,.3);
+        }
+
+        .online {
+            border-left: 5px solid #28a745;
+        }
+
+        .offline {
+            border-left: 5px solid #dc3545;
+        }
+
+        #hosts {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .host {
+            font-size: 18px;
+            font-weight: bold;
+        }
+
+        .metric {
+            margin-top: 5px;
+            color: #555;
+        }
+
+        #latencyChart {
+            max-height: 500px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="hosts"></div>
+    <div class="card">
+        <canvas id="latencyChart"></canvas>
+    </div>
+
+    <script>
+        let chart;
+
+        async function loadHosts() {
+            try {
+                const response = await fetch('http://localhost:3000/');
+                const data = await response.json();
+
+                const container = document.getElementById('hosts');
+
+                container.innerHTML = data.map(host => {
+                    const online = host.last_ping !== null;
+
+                    return `
+                        <div class="card ${online ? 'online' : 'offline'}">
+                            <div class="host">${host.host}</div>
+
+                            <div class="metric">
+                                Last ping: ${host.last_ping ?? '-'} ms
+                            </div>
+
+                            <div class="metric">
+                                Average: ${host.avg ?? '-'} ms
+                            </div>
+
+                            <div class="metric">
+                                Lost: ${(host.loss ?? 0).toFixed(2)}%
+                            </div>
+
+                            <div class="metric">
+                                Last:
+                                ${host.last_checked
+                                    ? new Date(host.last_checked).toLocaleString()
+                                    : '-'}
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                if (!data.length)
+                    return;
+
+                const canvas = document.getElementById('latencyChart');
+
+                if (!canvas)
+                    return;
+
+                const ctx = canvas.getContext('2d');
+
+                const hostComMaisHistorico = data.reduce((a, b) =>
+                    a.history.length >= b.history.length ? a : b
+                );
+
+                const labels = [...hostComMaisHistorico.history]
+                    .reverse()
+                    .map(item =>
+                        new Date(item.ts).toLocaleTimeString()
+                    );
+
+                const colors = ['#0078d4', '#28a745', '#dc3545', '#ffc107', '#6f42c1', '#fd7e14'];
+
+                const datasets = data.map((host, index) => ({
+                    label: host.host,
+                    data: [...host.history]
+                        .reverse()
+                        .map(item => item.ping),
+                    borderColor: colors[index % colors.length],
+                    backgroundColor: colors[index % colors.length] + '33',
+                    fill: false,
+                    tension: 0.3,
+                    spanGaps: true
+                }));
+
+                if (chart)
+                    chart.destroy();
+
+                chart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels,
+                        datasets
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: true,
+
+                        interaction: {
+                            mode: 'index',
+                            intersect: false
+                        },
+
+                        plugins: {
+                            legend: {
+                                position: 'top'
+                            },
+                            tooltip: {
+                                mode: 'index',
+                                intersect: false
+                            }
+                        },
+
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'Ping (ms)'
+                                }
+                            },
+                            x: {
+                                title: {
+                                    display: true,
+                                    text: 'Time'
+                                }
+                            }
+                        }
+                    }
+                });
+
+            } catch (err) {
+                console.error('Erro ao carregar hosts:', err);
+            }
+        }
+
+        loadHosts();
+        setInterval(loadHosts, 5000);
+    </script>
+
+</body>
+</html>
